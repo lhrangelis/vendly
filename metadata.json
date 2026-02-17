@@ -1,0 +1,5 @@
+{
+  "name": "Vendly",
+  "description": "Um aplicativo de painel para gerenciar produtos, categorias, vendas e visualizar estatísticas para uma loja pessoal.",
+  "requestFramePermissions": []
+}
