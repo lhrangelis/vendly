@@ -40,13 +40,14 @@ Com foco em performance, organização e crescimento futuro, o sistema oferece g
 
 ## 📂 Estrutura do Projeto
 ```
-src/
-├── controllers/
+vendly/
+├── components/
+├── contexts/
+├── dist/
+├── hooks/
+├── node_modules/
 ├── services/
-├── routes/
-├── middlewares/
-├── prisma/
-└── server.ts
+├── server/
 ```
 
 ---
@@ -82,19 +83,13 @@ npm run dev
 http://localhost:3000
 ```
 
-## 🔮 Roadmap
+## 🔮 Projetos em produção
 
  - Cadastro de clientes
 
- - Controle de estoque automático
-
  - Fluxo de caixa
 
- - Multiempresa
-
  - Autenticação JWT
-
- - Dashboard avançado
 
  - Deploy em ambiente cloud
 
