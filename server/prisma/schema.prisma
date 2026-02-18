@@ -1,0 +1,191 @@
+// Prisma Schema — Como o "Data Diagram" do Delphi
+// Este arquivo define TODAS as tabelas do banco de dados.
+// O Prisma lê isso e cria as tabelas automaticamente no SQLite.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUÁRIO — Login e perfil
+// ============================================
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ============================================
+// CATEGORIA — Agrupa produtos (Eletrônicos, Roupas, etc.)
+// ============================================
+model Category {
+  id       String    @id @default(cuid())
+  name     String
+  products Product[] // Relação 1:N — uma categoria tem vários produtos
+}
+
+// ============================================
+// PRODUTO — Item vendável
+// ============================================
+model Product {
+  id            String   @id @default(cuid())
+  name          String
+  description   String   @default("")
+  price         Float
+  cost          Float
+  stock         Int      @default(0)
+  weight        Float?
+  dimensions    String?
+  unitOfMeasure String?
+  sku           String?
+  barcode       String?
+  
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id])
+
+  saleItems     SaleItem[]
+  budgetItems   BudgetItem[]
+  promotions    PromotionProduct[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// VENDA — Registro de uma transação
+// ============================================
+model Sale {
+  id              String   @id @default(cuid())
+  total           Float
+  observations    String?
+  isDraft         Boolean  @default(false)
+
+  channelId       String?
+  channel         Channel?       @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
+  paymentMethodId String?
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+
+  items           SaleItem[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// ITEM DA VENDA — Tabela detalhe (mestre-detalhe como no Delphi)
+// ============================================
+model SaleItem {
+  id        String  @id @default(cuid())
+  quantity  Int
+  unitPrice Float
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// ORÇAMENTO — Proposta para o cliente
+// ============================================
+model Budget {
+  id            String   @id @default(cuid())
+  total         Float
+  clientName    String?
+  clientContact String?
+  validUntil    String?
+  observations  String?
+
+  items         BudgetItem[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// ITEM DO ORÇAMENTO — Detalhe do orçamento
+// ============================================
+model BudgetItem {
+  id        String  @id @default(cuid())
+  quantity  Int
+  unitPrice Float
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  budgetId  String
+  budget    Budget  @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// CANAL DE VENDA — De onde veio a venda (Loja Online, WhatsApp, etc.)
+// ============================================
+model Channel {
+  id          String  @id @default(cuid())
+  name        String
+  icon        String?
+  totalSales  Float   @default(0)
+  totalProfit Float   @default(0)
+
+  sales       Sale[]
+}
+
+// ============================================
+// FORMA DE PAGAMENTO — Como o cliente pagou
+// ============================================
+model PaymentMethod {
+  id    String  @id @default(cuid())
+  name  String
+  icon  String?
+
+  sales Sale[]
+}
+
+// ============================================
+// PROMOÇÃO — Desconto aplicado a produtos
+// ============================================
+model Promotion {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  startDate     String   // YYYY-MM-DD
+  endDate       String   // YYYY-MM-DD
+  discountType  String   // 'percentage' ou 'fixed'
+  discountValue Float
+
+  products      PromotionProduct[]
+}
+
+// Tabela intermediária — relação N:N entre Promoção e Produto
+model PromotionProduct {
+  id          String    @id @default(cuid())
+  
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, productId])
+}
+
+// ============================================
+// LOG — Registro de atividades do sistema
+// ============================================
+model Log {
+  id        String   @id @default(cuid())
+  action    String
+  type      String   // 'create' | 'update' | 'delete' | 'info'
+  timestamp DateTime @default(now())
+}

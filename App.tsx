@@ -1,9 +1,9 @@
-
-
-
-import React, { useState, useMemo } from 'react';
-import { useLocalStorage } from './hooks/useLocalStorage';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Category, Product, Sale, View, Notification, Channel, Log, PaymentMethod, User, Budget, Promotion } from './types';
+import {
+  authApi, productsApi, categoriesApi, salesApi, budgetsApi,
+  channelsApi, paymentMethodsApi, promotionsApi, logsApi, usersApi
+} from './services/api';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import Products from './components/Products';
@@ -19,72 +19,125 @@ import Analytics from './components/Analytics';
 import BudgetComponent from './components/Budget';
 import Promotions from './components/Promotions';
 
-// Initial mock data for a better first-time experience
-const initialCategories: Category[] = [
-  { id: '1', name: 'Eletrônicos' },
-  { id: '2', name: 'Livros' },
-  { id: '3', name: 'Roupas' },
-];
-
-const initialProducts: Product[] = [
-  { id: '1', name: 'Smartphone Pro', description: 'Última geração com câmera tripla.', price: 3999.90, cost: 2500, categoryId: '1', stock: 15, weight: 0.18, dimensions: '15x7x0.8 cm', unitOfMeasure: 'un', sku: 'SP-PRO-BLK', barcode: '1234567890123' },
-  { id: '2', name: 'React Avançado', description: 'Aprenda hooks e padrões.', price: 79.90, cost: 30, categoryId: '2', stock: 50 },
-  { id: '3', name: 'Camiseta de Algodão', description: 'Confortável e estilosa.', price: 59.90, cost: 1.00, categoryId: '3', stock: 1 },
-];
-
-const initialSales: Sale[] = [
-    { id: '1', items: [{ productId: '1', quantity: 1, unitPrice: 3999.90 }], total: 3999.90, createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), channelId: '1', paymentMethodId: '1' },
-    { id: '2', items: [{ productId: '2', quantity: 2, unitPrice: 79.90 }, { productId: '3', quantity: 1, unitPrice: 59.90 }], total: 219.70, createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), updatedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), channelId: '2', paymentMethodId: '2' },
-    { id: '3', items: [{ productId: '3', quantity: 3, unitPrice: 59.90 }], total: 179.70, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-];
-
-const initialChannels: Channel[] = [
-    { id: '1', name: 'Loja Online', icon: 'globe', totalSales: 3999.90, totalProfit: 1499.90 },
-    { id: '2', name: 'WhatsApp', icon: 'whatsapp', totalSales: 219.70, totalProfit: 99.7 },
-];
-
-const initialPaymentMethods: PaymentMethod[] = [
-    { id: '1', name: 'Cartão de Crédito', icon: 'credit-card' },
-    { id: '2', name: 'Pix', icon: 'pix' },
-];
-
 function App() {
   const [view, setView] = useState<View>('dashboard');
   const [isSidebarOpen, setSidebarOpen] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useLocalStorage('isAuthenticated', false);
-  
-  const [currentUser, setCurrentUser] = useLocalStorage<User>('currentUser', {
-    id: 'admin-user',
-    name: 'Admin',
-    email: 'admin@gestorloja.com',
-    avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80',
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('vendly_token'));
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Estado do usuário
+  const [currentUser, setCurrentUser] = useState<User>({
+    id: '', name: '', email: '',
   });
-  const [categories, setCategories] = useLocalStorage<Category[]>('categories', initialCategories);
-  const [products, setProducts] = useLocalStorage<Product[]>('products', initialProducts);
-  const [sales, setSales] = useLocalStorage<Sale[]>('sales', initialSales);
-  const [drafts, setDrafts] = useLocalStorage<Sale[]>('drafts', []);
-  const [budgets, setBudgets] = useLocalStorage<Budget[]>('budgets', []);
-  const [channels, setChannels] = useLocalStorage<Channel[]>('channels', initialChannels);
-  const [paymentMethods, setPaymentMethods] = useLocalStorage<PaymentMethod[]>('paymentMethods', initialPaymentMethods);
-  const [promotions, setPromotions] = useLocalStorage<Promotion[]>('promotions', []);
-  const [readNotifications, setReadNotifications] = useLocalStorage<string[]>('readNotifications', []);
-  const [logs, setLogs] = useLocalStorage<Log[]>('logs', []);
 
-  const addLog = (action: string, type: Log['type']) => {
-    const newLog: Log = {
-        id: Date.now().toString(),
-        timestamp: new Date().toISOString(),
-        action,
-        type,
-    };
-    setLogs(prev => [newLog, ...prev]);
-  };
+  // Estado das entidades — carregadas da API (não do localStorage)
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [drafts, setDrafts] = useState<Sale[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [logs, setLogs] = useState<Log[]>([]);
+  const [readNotifications, setReadNotifications] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('readNotifications') || '[]'); } catch { return []; }
+  });
 
-  const clearLogs = () => {
-    setLogs([]);
-    addLog('Histórico de atividades limpo.', 'delete');
-  };
+  // Carrega todos os dados da API (como abrir vários TQuery no Delphi)
+  const loadAllData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const [
+        productsData, categoriesData, salesData, draftsData,
+        budgetsData, channelsData, paymentMethodsData, promotionsData, logsData
+      ] = await Promise.all([
+        productsApi.list(),
+        categoriesApi.list(),
+        salesApi.list(),
+        salesApi.listDrafts(),
+        budgetsApi.list(),
+        channelsApi.list(),
+        paymentMethodsApi.list(),
+        promotionsApi.list(),
+        logsApi.list(),
+      ]);
 
+      setProducts(productsData.map((p: any) => ({
+        id: p.id, name: p.name, description: p.description,
+        price: p.price, cost: p.cost, categoryId: p.categoryId,
+        stock: p.stock, weight: p.weight, dimensions: p.dimensions,
+        unitOfMeasure: p.unitOfMeasure, sku: p.sku, barcode: p.barcode,
+      })));
+
+      setCategories(categoriesData);
+
+      const mapSale = (s: any) => ({
+        id: s.id,
+        items: s.items.map((i: any) => ({
+          productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice,
+        })),
+        total: s.total,
+        channelId: s.channelId || undefined,
+        paymentMethodId: s.paymentMethodId || undefined,
+        observations: s.observations || undefined,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      });
+
+      setSales(salesData.map(mapSale));
+      setDrafts(draftsData.map(mapSale));
+
+      setBudgets(budgetsData.map((b: any) => ({
+        id: b.id,
+        items: b.items.map((i: any) => ({
+          productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice,
+        })),
+        total: b.total,
+        clientName: b.clientName || undefined,
+        clientContact: b.clientContact || undefined,
+        validUntil: b.validUntil || undefined,
+        observations: b.observations || undefined,
+        createdAt: b.createdAt,
+        updatedAt: b.updatedAt,
+      })));
+
+      setChannels(channelsData);
+      setPaymentMethods(paymentMethodsData);
+      setPromotions(promotionsData);
+      setLogs(logsData);
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Ao autenticar, verifica token e carrega dados
+  useEffect(() => {
+    if (isAuthenticated) {
+      authApi.me().then((user) => {
+        setCurrentUser({
+          id: user.id, name: user.name,
+          email: user.email, avatarUrl: user.avatarUrl,
+        });
+        loadAllData();
+      }).catch(() => {
+        localStorage.removeItem('vendly_token');
+        setIsAuthenticated(false);
+        setIsLoading(false);
+      });
+    } else {
+      setIsLoading(false);
+    }
+  }, [isAuthenticated, loadAllData]);
+
+  // Notificações lidas ficam no localStorage (preferência local)
+  useEffect(() => {
+    localStorage.setItem('readNotifications', JSON.stringify(readNotifications));
+  }, [readNotifications]);
+
+  // Notificações de estoque baixo
   const allNotifications = useMemo((): Notification[] => {
     return products
       .filter(p => p.stock < 10)
@@ -93,14 +146,14 @@ function App() {
           return {
             id: `${p.id}-out_of_stock`,
             productName: p.name,
-            type: 'out_of_stock',
+            type: 'out_of_stock' as const,
             message: 'Esgotado',
           };
         } else {
           return {
             id: `${p.id}-low_stock`,
             productName: p.name,
-            type: 'low_stock',
+            type: 'low_stock' as const,
             message: `Apenas ${p.stock} em estoque`,
           };
         }
@@ -110,256 +163,295 @@ function App() {
   const unreadNotifications = useMemo(() => {
     return allNotifications.filter(n => !readNotifications.includes(n.id));
   }, [allNotifications, readNotifications]);
-  
+
   const markAllNotificationsAsRead = () => {
     const notificationIds = allNotifications.map(n => n.id);
     setReadNotifications(notificationIds);
-    addLog('Notificações marcadas como lidas.', 'info');
   };
 
-  const addCategory = (name: string) => {
-    const newCategory: Category = { id: Date.now().toString(), name };
-    setCategories(prev => [...prev, newCategory]);
-    addLog(`Categoria "${name}" criada.`, 'create');
+  // --- Categories ---
+  const addCategory = async (name: string) => {
+    try {
+      const newCategory = await categoriesApi.create(name);
+      setCategories(prev => [...prev, newCategory]);
+    } catch (error) { console.error('Erro ao criar categoria:', error); }
   };
 
-  const deleteCategory = (id: string) => {
-    const category = categories.find(c => c.id === id);
-    if(category) {
-        setCategories(prev => prev.filter(c => c.id !== id));
-        addLog(`Categoria "${category.name}" excluída.`, 'delete');
-    }
-  };
-  
-  const addChannel = (name: string, icon: string) => {
-    const newChannel: Channel = { id: Date.now().toString(), name, icon, totalSales: 0, totalProfit: 0 };
-    setChannels(prev => [...prev, newChannel]);
-    addLog(`Canal de venda "${name}" criado.`, 'create');
-  };
-  
-  const updateChannel = (updatedChannel: Channel) => {
-    setChannels(prev => prev.map(c => c.id === updatedChannel.id ? updatedChannel : c));
-    addLog(`Canal de venda "${updatedChannel.name}" atualizado.`, 'update');
+  const deleteCategory = async (id: string) => {
+    try {
+      await categoriesApi.delete(id);
+      setCategories(prev => prev.filter(c => c.id !== id));
+    } catch (error) { console.error('Erro ao excluir categoria:', error); }
   };
 
-  const deleteChannel = (id: string) => {
-    const channel = channels.find(c => c.id === id);
-    if (channel) {
-        setChannels(prev => prev.filter(c => c.id !== id));
-        setSales(prev => prev.map(s => s.channelId === id ? { ...s, channelId: undefined } : s));
-        addLog(`Canal de venda "${channel.name}" excluído.`, 'delete');
-    }
+  // --- Channels ---
+  const addChannel = async (name: string, icon: string) => {
+    try {
+      const newChannel = await channelsApi.create(name, icon);
+      setChannels(prev => [...prev, newChannel]);
+    } catch (error) { console.error('Erro ao criar canal:', error); }
   };
 
-  const addPaymentMethod = (name: string, icon: string) => {
-    const newMethod: PaymentMethod = { id: Date.now().toString(), name, icon };
-    setPaymentMethods(prev => [...prev, newMethod]);
-    addLog(`Forma de pagamento "${name}" criada.`, 'create');
-  };
-  
-  const updatePaymentMethod = (updatedMethod: PaymentMethod) => {
-    setPaymentMethods(prev => prev.map(p => p.id === updatedMethod.id ? updatedMethod : p));
-    addLog(`Forma de pagamento "${updatedMethod.name}" atualizada.`, 'update');
+  const updateChannel = async (updatedChannel: Channel) => {
+    try {
+      const result = await channelsApi.update(updatedChannel.id, {
+        name: updatedChannel.name, icon: updatedChannel.icon,
+      });
+      setChannels(prev => prev.map(c => c.id === result.id ? result : c));
+    } catch (error) { console.error('Erro ao atualizar canal:', error); }
   };
 
-  const deletePaymentMethod = (id: string) => {
-    const method = paymentMethods.find(p => p.id === id);
-    if (method) {
-        setPaymentMethods(prev => prev.filter(p => p.id !== id));
-        setSales(prev => prev.map(s => s.paymentMethodId === id ? { ...s, paymentMethodId: undefined } : s));
-        addLog(`Forma de pagamento "${method.name}" excluída.`, 'delete');
-    }
+  const deleteChannel = async (id: string) => {
+    try {
+      await channelsApi.delete(id);
+      setChannels(prev => prev.filter(c => c.id !== id));
+      setSales(prev => prev.map(s => s.channelId === id ? { ...s, channelId: undefined } : s));
+    } catch (error) { console.error('Erro ao excluir canal:', error); }
   };
 
-  const addProduct = (product: Omit<Product, 'id'>) => {
-    const newProduct: Product = { ...product, id: Date.now().toString() };
-    setProducts(prev => [...prev, newProduct]);
-    addLog(`Produto "${product.name}" adicionado.`, 'create');
-  };
-  
-  const updateProduct = (updatedProduct: Product) => {
-    setProducts(prev => prev.map(p => (p.id === updatedProduct.id ? updatedProduct : p)));
-    addLog(`Produto "${updatedProduct.name}" atualizado.`, 'update');
+  // --- Payment Methods ---
+  const addPaymentMethod = async (name: string, icon: string) => {
+    try {
+      const newMethod = await paymentMethodsApi.create(name, icon);
+      setPaymentMethods(prev => [...prev, newMethod]);
+    } catch (error) { console.error('Erro ao criar forma de pagamento:', error); }
   };
 
-  const deleteProduct = (id: string) => {
-    const product = products.find(p => p.id === id);
-    if (product) {
-        setProducts(prev => prev.filter(p => p.id !== id));
-        addLog(`Produto "${product.name}" excluído.`, 'delete');
-    }
+  const updatePaymentMethod = async (updatedMethod: PaymentMethod) => {
+    try {
+      const result = await paymentMethodsApi.update(updatedMethod.id, {
+        name: updatedMethod.name, icon: updatedMethod.icon,
+      });
+      setPaymentMethods(prev => prev.map(p => p.id === result.id ? result : p));
+    } catch (error) { console.error('Erro ao atualizar forma de pagamento:', error); }
   };
 
-  const calculateSaleProfit = (sale: Pick<Sale, 'items'>): number => {
-      return sale.items.reduce((profit, item) => {
-          const product = products.find(p => p.id === item.productId);
-          const itemCost = product ? product.cost * item.quantity : 0;
-          return profit + (item.unitPrice * item.quantity - itemCost);
-      }, 0);
+  const deletePaymentMethod = async (id: string) => {
+    try {
+      await paymentMethodsApi.delete(id);
+      setPaymentMethods(prev => prev.filter(p => p.id !== id));
+      setSales(prev => prev.map(s => s.paymentMethodId === id ? { ...s, paymentMethodId: undefined } : s));
+    } catch (error) { console.error('Erro ao excluir forma de pagamento:', error); }
   };
 
-  const addSale = (sale: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const now = new Date().toISOString();
-    const newSale: Sale = { ...sale, id: Date.now().toString(), createdAt: now, updatedAt: now };
-    setSales(prev => [...prev, newSale]);
-    addLog(`Venda de ${newSale.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} finalizada.`, 'create');
-
-    setProducts(prev => prev.map(p => {
-        const itemSold = sale.items.find(item => item.productId === p.id);
-        if (itemSold) {
-            return { ...p, stock: p.stock - itemSold.quantity };
-        }
-        return p;
-    }));
-    
-    if (newSale.channelId) {
-        const profit = calculateSaleProfit(newSale);
-        setChannels(prev => prev.map(c => 
-            c.id === newSale.channelId 
-            ? { ...c, totalSales: c.totalSales + newSale.total, totalProfit: c.totalProfit + profit } 
-            : c
-        ));
-    }
+  // --- Products ---
+  const addProduct = async (product: Omit<Product, 'id'>) => {
+    try {
+      const newProduct = await productsApi.create(product);
+      setProducts(prev => [...prev, {
+        id: newProduct.id, name: newProduct.name, description: newProduct.description,
+        price: newProduct.price, cost: newProduct.cost, categoryId: newProduct.categoryId,
+        stock: newProduct.stock, weight: newProduct.weight, dimensions: newProduct.dimensions,
+        unitOfMeasure: newProduct.unitOfMeasure, sku: newProduct.sku, barcode: newProduct.barcode,
+      }]);
+    } catch (error) { console.error('Erro ao criar produto:', error); }
   };
 
-  const updateSale = (updatedSale: Sale) => {
-    const originalSale = sales.find(s => s.id === updatedSale.id);
-    if (!originalSale) return;
-
-    addLog(`Venda #${updatedSale.id.slice(-5)} atualizada.`, 'update');
-
-    setProducts(prevProducts => {
-        const productsCopy = JSON.parse(JSON.stringify(prevProducts));
-        const originalItemsMap = new Map(originalSale.items.map(i => [i.productId, i.quantity]));
-        const updatedItemsMap = new Map(updatedSale.items.map(i => [i.productId, i.quantity]));
-        const allProductIds = new Set([...originalItemsMap.keys(), ...updatedItemsMap.keys()]);
-
-        allProductIds.forEach(productId => {
-            const productIndex = productsCopy.findIndex((p: Product) => p.id === productId);
-            if (productIndex > -1) {
-                const originalQty = originalItemsMap.get(productId) || 0;
-                const updatedQty = updatedItemsMap.get(productId) || 0;
-                const diff = originalQty - updatedQty;
-                productsCopy[productIndex].stock += diff;
-            }
-        });
-        return productsCopy;
-    });
-
-    const originalProfit = calculateSaleProfit(originalSale);
-    const updatedProfit = calculateSaleProfit(updatedSale);
-    
-    setChannels(prev => {
-        const newChannels = [...prev];
-        if (originalSale.channelId) {
-            const oldChannelIndex = newChannels.findIndex(c => c.id === originalSale.channelId);
-            if (oldChannelIndex > -1) {
-                newChannels[oldChannelIndex] = {
-                    ...newChannels[oldChannelIndex],
-                    totalSales: newChannels[oldChannelIndex].totalSales - originalSale.total,
-                    totalProfit: newChannels[oldChannelIndex].totalProfit - originalProfit,
-                };
-            }
-        }
-        if (updatedSale.channelId) {
-            const newChannelIndex = newChannels.findIndex(c => c.id === updatedSale.channelId);
-            if (newChannelIndex > -1) {
-                 newChannels[newChannelIndex] = {
-                    ...newChannels[newChannelIndex],
-                    totalSales: newChannels[newChannelIndex].totalSales + updatedSale.total,
-                    totalProfit: newChannels[newChannelIndex].totalProfit + updatedProfit,
-                };
-            }
-        }
-        return newChannels;
-    });
-
-    setSales(prev => prev.map(s => (s.id === updatedSale.id ? { ...updatedSale, updatedAt: new Date().toISOString() } : s)));
+  const updateProduct = async (updatedProduct: Product) => {
+    try {
+      const result = await productsApi.update(updatedProduct.id, updatedProduct);
+      setProducts(prev => prev.map(p => p.id === result.id ? {
+        id: result.id, name: result.name, description: result.description,
+        price: result.price, cost: result.cost, categoryId: result.categoryId,
+        stock: result.stock, weight: result.weight, dimensions: result.dimensions,
+        unitOfMeasure: result.unitOfMeasure, sku: result.sku, barcode: result.barcode,
+      } : p));
+    } catch (error) { console.error('Erro ao atualizar produto:', error); }
   };
 
-  const deleteSale = (id: string) => {
-    const saleToDelete = sales.find(s => s.id === id);
-    if (saleToDelete) {
-        setProducts(prev => prev.map(p => {
-            const itemSold = saleToDelete.items.find(item => item.productId === p.id);
-            if (itemSold) {
-                return { ...p, stock: p.stock + itemSold.quantity };
-            }
-            return p;
-        }));
-        
-        if (saleToDelete.channelId) {
-            const profit = calculateSaleProfit(saleToDelete);
-            setChannels(prev => prev.map(c => 
-                c.id === saleToDelete.channelId 
-                ? { ...c, totalSales: c.totalSales - saleToDelete.total, totalProfit: c.totalProfit - profit } 
-                : c
-            ));
-        }
-        addLog(`Venda #${id.slice(-5)} excluída.`, 'delete');
-    }
-    setSales(prev => prev.filter(s => s.id !== id));
+  const deleteProduct = async (id: string) => {
+    try {
+      await productsApi.delete(id);
+      setProducts(prev => prev.filter(p => p.id !== id));
+    } catch (error) { console.error('Erro ao excluir produto:', error); }
   };
 
-  const addDraft = (draft: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const now = new Date().toISOString();
-    const newDraft: Sale = { ...draft, id: Date.now().toString(), createdAt: now, updatedAt: now };
-    setDrafts(prev => [...prev, newDraft]);
-    addLog(`Rascunho de venda salvo.`, 'create');
+  // --- Sales (recarrega tudo pois afeta estoque e canais) ---
+  const addSale = async (sale: Omit<Sale, 'id' | 'updatedAt'>) => {
+    try {
+      await salesApi.create({
+        items: sale.items,
+        total: sale.total,
+        channelId: sale.channelId || null,
+        paymentMethodId: sale.paymentMethodId || null,
+        observations: sale.observations,
+        isDraft: false,
+        createdAt: sale.createdAt,
+      });
+      await loadAllData();
+    } catch (error) { console.error('Erro ao criar venda:', error); }
   };
 
-  const updateDraft = (updatedDraft: Sale) => {
-    setDrafts(prev => prev.map(d => (d.id === updatedDraft.id ? { ...updatedDraft, updatedAt: new Date().toISOString() } : d)));
-    addLog(`Rascunho #${updatedDraft.id.slice(-5)} atualizado.`, 'update');
+  const updateSale = async (updatedSale: Sale) => {
+    try {
+      await salesApi.update(updatedSale.id, {
+        items: updatedSale.items,
+        total: updatedSale.total,
+        channelId: updatedSale.channelId || null,
+        paymentMethodId: updatedSale.paymentMethodId || null,
+        observations: updatedSale.observations,
+        isDraft: false,
+        createdAt: updatedSale.createdAt,
+      });
+      await loadAllData();
+    } catch (error) { console.error('Erro ao atualizar venda:', error); }
   };
 
-  const deleteDraft = (id: string) => {
-    setDrafts(prev => prev.filter(d => d.id !== id));
-    addLog(`Rascunho #${id.slice(-5)} excluído.`, 'delete');
-  };
-  
-  const addBudget = (budget: Omit<Budget, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const now = new Date().toISOString();
-    const newBudget: Budget = { ...budget, id: Date.now().toString(), createdAt: now, updatedAt: now };
-    setBudgets(prev => [...prev, newBudget]);
-    addLog(`Orçamento para "${budget.clientName || 'Cliente'}" criado.`, 'create');
+  const deleteSale = async (id: string) => {
+    try {
+      await salesApi.delete(id);
+      await loadAllData();
+    } catch (error) { console.error('Erro ao excluir venda:', error); }
   };
 
-  const updateBudget = (updatedBudget: Budget) => {
-    setBudgets(prev => prev.map(b => (b.id === updatedBudget.id ? { ...updatedBudget, updatedAt: new Date().toISOString() } : b)));
-    addLog(`Orçamento #${updatedBudget.id.slice(-5)} atualizado.`, 'update');
+  // --- Drafts (rascunhos são vendas com isDraft=true) ---
+  const addDraft = async (draft: Omit<Sale, 'id' | 'updatedAt'>) => {
+    try {
+      const newDraft = await salesApi.create({
+        items: draft.items,
+        total: draft.total,
+        channelId: draft.channelId || null,
+        paymentMethodId: draft.paymentMethodId || null,
+        observations: draft.observations,
+        isDraft: true,
+        createdAt: draft.createdAt,
+      });
+      setDrafts(prev => [...prev, {
+        id: newDraft.id,
+        items: newDraft.items.map((i: any) => ({
+          productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice,
+        })),
+        total: newDraft.total,
+        channelId: newDraft.channelId || undefined,
+        paymentMethodId: newDraft.paymentMethodId || undefined,
+        observations: newDraft.observations || undefined,
+        createdAt: newDraft.createdAt,
+        updatedAt: newDraft.updatedAt,
+      }]);
+    } catch (error) { console.error('Erro ao salvar rascunho:', error); }
   };
 
-  const deleteBudget = (id: string) => {
-    const budget = budgets.find(b => b.id === id);
-    if(budget) addLog(`Orçamento #${id.slice(-5)} para "${budget.clientName || 'Cliente'}" excluído.`, 'delete');
-    setBudgets(prev => prev.filter(b => b.id !== id));
-  };
-  
-  const addPromotion = (promotion: Omit<Promotion, 'id'>) => {
-    const newPromotion: Promotion = { ...promotion, id: Date.now().toString() };
-    setPromotions(prev => [...prev, newPromotion]);
-    addLog(`Promoção "${promotion.name}" criada.`, 'create');
+  const updateDraft = async (updatedDraft: Sale) => {
+    try {
+      const result = await salesApi.update(updatedDraft.id, {
+        items: updatedDraft.items,
+        total: updatedDraft.total,
+        channelId: updatedDraft.channelId || null,
+        paymentMethodId: updatedDraft.paymentMethodId || null,
+        observations: updatedDraft.observations,
+        isDraft: true,
+        createdAt: updatedDraft.createdAt,
+      });
+      setDrafts(prev => prev.map(d => d.id === result.id ? {
+        id: result.id,
+        items: result.items.map((i: any) => ({
+          productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice,
+        })),
+        total: result.total,
+        channelId: result.channelId || undefined,
+        paymentMethodId: result.paymentMethodId || undefined,
+        observations: result.observations || undefined,
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt,
+      } : d));
+    } catch (error) { console.error('Erro ao atualizar rascunho:', error); }
   };
 
-  const updatePromotion = (updatedPromotion: Promotion) => {
-    setPromotions(prev => prev.map(p => (p.id === updatedPromotion.id ? updatedPromotion : p)));
-    addLog(`Promoção "${updatedPromotion.name}" atualizada.`, 'update');
+  const deleteDraft = async (id: string) => {
+    try {
+      await salesApi.delete(id);
+      setDrafts(prev => prev.filter(d => d.id !== id));
+    } catch (error) { console.error('Erro ao excluir rascunho:', error); }
   };
 
-  const deletePromotion = (id: string) => {
-    const promotion = promotions.find(p => p.id === id);
-    if (promotion) {
-        setPromotions(prev => prev.filter(p => p.id !== id));
-        addLog(`Promoção "${promotion.name}" excluída.`, 'delete');
-    }
+  // --- Budgets ---
+  const addBudget = async (budget: Omit<Budget, 'id' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      const newBudget = await budgetsApi.create(budget);
+      setBudgets(prev => [...prev, {
+        id: newBudget.id,
+        items: newBudget.items.map((i: any) => ({
+          productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice,
+        })),
+        total: newBudget.total,
+        clientName: newBudget.clientName || undefined,
+        clientContact: newBudget.clientContact || undefined,
+        validUntil: newBudget.validUntil || undefined,
+        observations: newBudget.observations || undefined,
+        createdAt: newBudget.createdAt,
+        updatedAt: newBudget.updatedAt,
+      }]);
+    } catch (error) { console.error('Erro ao criar orçamento:', error); }
   };
 
-  const updateUser = (updatedUser: User) => {
-    setCurrentUser(updatedUser);
-    addLog(`Perfil de "${updatedUser.name}" atualizado.`, 'update');
+  const updateBudget = async (updatedBudget: Budget) => {
+    try {
+      const result = await budgetsApi.update(updatedBudget.id, updatedBudget);
+      setBudgets(prev => prev.map(b => b.id === result.id ? {
+        id: result.id,
+        items: result.items.map((i: any) => ({
+          productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice,
+        })),
+        total: result.total,
+        clientName: result.clientName || undefined,
+        clientContact: result.clientContact || undefined,
+        validUntil: result.validUntil || undefined,
+        observations: result.observations || undefined,
+        createdAt: result.createdAt,
+        updatedAt: result.updatedAt,
+      } : b));
+    } catch (error) { console.error('Erro ao atualizar orçamento:', error); }
   };
-  
+
+  const deleteBudget = async (id: string) => {
+    try {
+      await budgetsApi.delete(id);
+      setBudgets(prev => prev.filter(b => b.id !== id));
+    } catch (error) { console.error('Erro ao excluir orçamento:', error); }
+  };
+
+  // --- Promotions ---
+  const addPromotion = async (promotion: Omit<Promotion, 'id'>) => {
+    try {
+      const newPromotion = await promotionsApi.create(promotion);
+      setPromotions(prev => [...prev, newPromotion]);
+    } catch (error) { console.error('Erro ao criar promoção:', error); }
+  };
+
+  const updatePromotion = async (updatedPromotion: Promotion) => {
+    try {
+      const result = await promotionsApi.update(updatedPromotion.id, updatedPromotion);
+      setPromotions(prev => prev.map(p => p.id === result.id ? result : p));
+    } catch (error) { console.error('Erro ao atualizar promoção:', error); }
+  };
+
+  const deletePromotion = async (id: string) => {
+    try {
+      await promotionsApi.delete(id);
+      setPromotions(prev => prev.filter(p => p.id !== id));
+    } catch (error) { console.error('Erro ao excluir promoção:', error); }
+  };
+
+  // --- User ---
+  const updateUser = async (updatedUser: User) => {
+    try {
+      const result = await usersApi.updateProfile(updatedUser);
+      setCurrentUser({
+        id: result.id, name: result.name,
+        email: result.email, avatarUrl: result.avatarUrl,
+      });
+    } catch (error) { console.error('Erro ao atualizar perfil:', error); }
+  };
+
+  // --- Logs ---
+  const clearLogs = async () => {
+    try {
+      await logsApi.clear();
+      const updatedLogs = await logsApi.list();
+      setLogs(updatedLogs);
+    } catch (error) { console.error('Erro ao limpar logs:', error); }
+  };
+
   const renderView = () => {
     switch (view) {
       case 'dashboard':
@@ -375,36 +467,36 @@ function App() {
       case 'paymentMethods':
         return <PaymentMethods paymentMethods={paymentMethods} addPaymentMethod={addPaymentMethod} updatePaymentMethod={updatePaymentMethod} deletePaymentMethod={deletePaymentMethod} />;
       case 'sales':
-        return <Sales 
-                    products={products} 
-                    sales={sales}
-                    channels={channels}
-                    paymentMethods={paymentMethods}
-                    promotions={promotions}
-                    addSale={addSale} 
-                    updateSale={updateSale}
-                    deleteSale={deleteSale}
-                    drafts={drafts}
-                    addDraft={addDraft}
-                    updateDraft={updateDraft}
-                    deleteDraft={deleteDraft}
-                />;
+        return <Sales
+          products={products}
+          sales={sales}
+          channels={channels}
+          paymentMethods={paymentMethods}
+          promotions={promotions}
+          addSale={addSale}
+          updateSale={updateSale}
+          deleteSale={deleteSale}
+          drafts={drafts}
+          addDraft={addDraft}
+          updateDraft={updateDraft}
+          deleteDraft={deleteDraft}
+        />;
       case 'budget':
         return <BudgetComponent
-                    products={products}
-                    budgets={budgets}
-                    addBudget={addBudget}
-                    updateBudget={updateBudget}
-                    deleteBudget={deleteBudget}
-                />;
+          products={products}
+          budgets={budgets}
+          addBudget={addBudget}
+          updateBudget={updateBudget}
+          deleteBudget={deleteBudget}
+        />;
       case 'promotions':
         return <Promotions
-                  promotions={promotions}
-                  products={products}
-                  addPromotion={addPromotion}
-                  updatePromotion={updatePromotion}
-                  deletePromotion={deletePromotion}
-               />;
+          promotions={promotions}
+          products={products}
+          addPromotion={addPromotion}
+          updatePromotion={updatePromotion}
+          deletePromotion={deletePromotion}
+        />;
       case 'admin':
         return <Admin logs={logs} clearLogs={clearLogs} />;
       case 'profile':
@@ -414,44 +506,74 @@ function App() {
     }
   };
 
-  const handleLogin = (user: string, pass: string): boolean => {
-    if (user === 'admin' && pass === 'admin') {
+  // Login via API com JWT
+  const handleLogin = async (emailOrUser: string, password: string): Promise<boolean> => {
+    try {
+      const email = emailOrUser.includes('@') ? emailOrUser : `${emailOrUser}@vendly.com`;
+      const result = await authApi.login(email, password);
+      localStorage.setItem('vendly_token', result.token);
+      setCurrentUser({
+        id: result.user.id, name: result.user.name,
+        email: result.user.email, avatarUrl: result.user.avatarUrl,
+      });
       setIsAuthenticated(true);
-      addLog('Usuário fez login.', 'info');
       return true;
+    } catch {
+      return false;
     }
-    return false;
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('vendly_token');
     setIsAuthenticated(false);
+    setCurrentUser({ id: '', name: '', email: '' });
+    setProducts([]);
+    setSales([]);
+    setDrafts([]);
+    setBudgets([]);
+    setCategories([]);
+    setChannels([]);
+    setPaymentMethods([]);
+    setPromotions([]);
+    setLogs([]);
   };
 
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background dark:bg-dark-background">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-text-secondary dark:text-dark-text-secondary">Carregando dados...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex text-text-primary dark:text-dark-text-primary">
-      <Sidebar 
-        currentView={view} 
-        setView={setView} 
-        isOpen={isSidebarOpen} 
-        setIsOpen={setSidebarOpen} 
+      <Sidebar
+        currentView={view}
+        setView={setView}
+        isOpen={isSidebarOpen}
+        setIsOpen={setSidebarOpen}
         onLogout={handleLogout}
         user={currentUser}
       />
       <div className="flex-1 flex flex-col md:pl-64">
-        <Header 
+        <Header
           toggleSidebar={() => setSidebarOpen(prev => !prev)}
-          currentView={view} 
+          currentView={view}
           notifications={unreadNotifications}
           markAllAsRead={markAllNotificationsAsRead}
         />
         <main className="flex-grow">
-            <div className="container mx-auto p-4 md:p-8">
-                {renderView()}
-            </div>
+          <div className="container mx-auto p-4 md:p-8">
+            {renderView()}
+          </div>
         </main>
       </div>
     </div>

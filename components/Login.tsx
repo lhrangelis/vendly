@@ -3,19 +3,28 @@ import React, { useState } from 'react';
 import { StoreIcon, GoogleIcon } from './icons/Icons';
 
 interface LoginProps {
-    onLogin: (user: string, pass: string) => boolean;
+    onLogin: (user: string, pass: string) => boolean | Promise<boolean>;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
-        if (!onLogin(username, password)) {
-            setError('Usuário ou senha inválidos.');
+        setIsLoading(true);
+        try {
+            const success = await onLogin(username, password);
+            if (!success) {
+                setError('Usuário ou senha inválidos.');
+            }
+        } catch {
+            setError('Erro ao conectar com o servidor.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -86,7 +95,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     </div>
 
                 </div>
-                 <div className="mt-6 text-center">
+                <div className="mt-6 text-center">
                     <p className="text-sm text-text-secondary dark:text-dark-text-secondary">
                         Não tem uma conta?{' '}
                         <a href="#" onClick={(e) => e.preventDefault()} className="font-medium text-primary hover:underline">
