@@ -83,9 +83,15 @@ npm run dev
 http://localhost:3000
 ```
 
+---
+
 ## 🔮 Projetos em produção
 
  - Cadastro de clientes
+
+ - Tela de Cadastro de Usúario (Login)
+
+ - Opção de login com conta do Google
 
  - Fluxo de caixa
 
@@ -93,6 +99,8 @@ http://localhost:3000
 
  - Deploy em ambiente cloud
 
+ ---
+
 ## 🎯 Objetivo
 
-O Vendly foi desenvolvido inicialmente para uso interno, mas estruturado desde o início para futura evolução como produto SaaS.
+O Vendly foi desenvolvido inicialmente para uso interno, mas estruturado desde o início para futura evolução.
